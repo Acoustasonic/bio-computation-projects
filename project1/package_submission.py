@@ -13,11 +13,12 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 from project1.analysis import load_predictions, load_reference, read_json, sha256
+from project1.multiseed import SUMMARY_FILES, verify_summary
 
 RUN_FILES = ("config.json", "metrics.json", "history.json", "history.csv", "run_manifest.json", "validation_predictions.npz")
 AUDIT_FILES = ("summary.json", "record_audit.csv", "accepted_edges.csv", "components.csv", "verification.json")
 COMPARISON_FILES = ("comparison.json", "comparison.csv", "selection.json", "per_protein.csv", "history.png", "per_class_f1.png", "confusion_matrices.png", "boundary_metrics.png")
-CLI_FILES = ("prepare_data.py", "train.py", "predict.py", "evaluate.py", "analyze_results.py", "package_submission.py", "inspect_data.py", "starter/run_baseline.py")
+CLI_FILES = ("prepare_data.py", "train.py", "predict.py", "evaluate.py", "analyze_results.py", "analyze_multiseed.py", "package_submission.py", "inspect_data.py", "starter/run_baseline.py")
 
 
 def project_path(value):
@@ -33,9 +34,18 @@ def require_file(path):
 def package(args):
     data, selection_path, pred_path, report_path = map(project_path, (args.data, args.selection, args.pred, args.report))
     selection = read_json(selection_path)
-    comparison_dir = selection_path.parent
+    multi_seed = selection.get("multi_seed_selection") is True
+    multi_records = None
+    if multi_seed:
+        runs_root = project_path(args.runs_root)
+        multi_records, multi_summary, verified_selection = verify_summary(data, runs_root, selection_path.parent)
+        if selection != verified_selection:
+            raise ValueError("Multi-seed selection differs from the recomputed fixed protocol")
+        comparison_dir = runs_root / "comparison"
+    else:
+        comparison_dir = selection_path.parent
     comparison = read_json(comparison_dir / "comparison.json")
-    if comparison.get("split") != "validation" or selection.get("selection_split") != "validation" or selection.get("selection_metric") != "q3":
+    if comparison.get("split") != "validation" or selection.get("selection_split") != "validation" or selection.get("selection_metric") != ("mean_q3" if multi_seed else "q3"):
         raise ValueError("Selection must use validation Q3")
     methods = comparison.get("methods", [])
     candidates = [method for method in methods if method.get("role") == "candidate"]
@@ -43,7 +53,18 @@ def package(args):
         raise ValueError("Comparison requires a baseline and two differently named candidates")
     if next(m for m in methods if m.get("role") == "baseline")["model_name"] != "convolutional" or any(m["model_name"] == "convolutional" for m in candidates):
         raise ValueError("The released convolutional model must remain the baseline")
-    selected = sorted(candidates, key=lambda m: (-m["validation_metrics"]["q3"], -m["validation_metrics"]["macro_f1"], m["model_name"]))[0]
+    if multi_seed:
+        selected = next(r for r in multi_records if r["seed"] == 42 and r["method"] == selection["selected_method"])
+        # Detailed seed-42 figures are descriptive; their single-seed winner
+        # cannot override the method chosen from the fixed five-seed means.
+        for method in methods:
+            corresponding = next(r for r in multi_records if r["seed"] == 42 and r["model_name"] == method["model_name"])
+            if project_path(method["run_dir"]) != project_path(corresponding["run_dir"]) or method["validation_metrics"] != corresponding["validation_metrics"]:
+                raise ValueError("Seed-42 detailed comparison differs from multi-seed evidence")
+            if any(corresponding["evidence_sha256"].get(f) != digest for f, digest in method["evidence_sha256"].items()):
+                raise ValueError("Seed-42 detailed comparison has stale run evidence")
+    else:
+        selected = sorted(candidates, key=lambda m: (-m["validation_metrics"]["q3"], -m["validation_metrics"]["macro_f1"], m["model_name"]))[0]
     selected_run = project_path(selection["selected_run_dir"])
     if selected_run != project_path(selected["run_dir"]) or selection["selected_model_name"] != selected["model_name"] or selection["validation_metrics"] != selected["validation_metrics"]:
         raise ValueError("Selection differs from validation comparison ranking")
@@ -55,8 +76,12 @@ def package(args):
         raise ValueError("Processed test IDs/lengths differ from the released test order")
     load_predictions(pred_path, ids, mask)
     prediction_metadata = pred_path.with_suffix(".metadata.json")
+    if multi_seed and not prediction_metadata.is_file():
+        raise ValueError("Multi-seed submissions require prediction metadata from the selected seed-42 checkpoint")
     if prediction_metadata.exists():
         metadata = read_json(prediction_metadata)
+        if multi_seed and (metadata.get("selection_split") != "validation" or metadata.get("split") != "test"):
+            raise ValueError("Multi-seed test prediction metadata must record validation-only selection")
         if metadata.get("checkpoint_sha256") != sha256(selected_run / "model.pt"):
             raise ValueError("Prediction metadata does not identify the selected checkpoint")
         if metadata.get("model_name") != selection["selected_model_name"]:
@@ -64,6 +89,8 @@ def package(args):
         if metadata.get("prediction_sha256") != sha256(pred_path):
             raise ValueError("Prediction file differs from its saved inference metadata")
     validation_ids, _, validation_mask = load_reference(data, "validation")
+    if set(comparison["reference_sha256"]) != {"ids.npy", "lengths.npy", "X.npy", "Y.npy"}:
+        raise ValueError("Incomplete seed-42 validation reference evidence")
     for filename, expected in comparison["reference_sha256"].items():
         if filename not in ("ids.npy", "lengths.npy", "X.npy", "Y.npy") or sha256(data / "validation" / filename) != expected:
             raise ValueError("Validation reference changed after comparison")
@@ -104,9 +131,17 @@ def package(args):
     for filename in AUDIT_FILES:
         add(audit / filename, f"outputs/data_audit/{filename}")
     for filename in COMPARISON_FILES:
-        if filename != "selection.json":
+        if filename != "selection.json" or multi_seed:
             add(comparison_dir / filename, f"outputs/comparison/{filename}")
-    for index, method in enumerate(methods):
+    if multi_seed:
+        add(runs_root / "multiseed" / "run_plan.json", "outputs/multiseed/run_plan.json")
+        for filename in SUMMARY_FILES:
+            if filename != "selection.json":
+                add(selection_path.parent / filename, f"outputs/multiseed_summary/{filename}")
+        for filename in ("run_multiseed.py",):
+            add(ROOT / filename, filename)
+    archive_run_dirs = {}
+    for index, method in enumerate(multi_records if multi_seed else methods):
         run = project_path(method["run_dir"])
         config = read_json(run / "config.json")
         if config["model"]["name"] != method["model_name"]:
@@ -118,19 +153,27 @@ def package(args):
             raise ValueError(f"Run manifest does not match the model evidence: {run}")
         load_predictions(run / "validation_predictions.npz", validation_ids, validation_mask)
         expected_evidence = {"config.json", "metrics.json", "history.json", "history.csv", "validation_predictions.npz", "model.pt"}
+        if multi_seed:
+            expected_evidence.add("run_manifest.json")
         if set(method.get("evidence_sha256", {})) != expected_evidence:
             raise ValueError(f"Incomplete comparison evidence for {run}")
         for filename, digest in method["evidence_sha256"].items():
             if filename not in (*RUN_FILES, "model.pt") or sha256(run / filename) != digest:
                 raise ValueError(f"Run evidence changed since analysis: {run / filename}")
-        # Fixed indexed folders avoid unsafe or colliding model-name paths.
+        if multi_seed:
+            archive_dir = (f"outputs/runs/{method['method']}" if method["seed"] == 42
+                           else f"outputs/multiseed/seed_{method['seed']}/{method['method']}")
+        else:
+            archive_dir = f"outputs/runs/{index}_{method['role']}"
+        archive_run_dirs[str(run)] = archive_dir
         for filename in RUN_FILES:
-            add(run / filename, f"outputs/runs/{index}_{method['role']}/{filename}")
-    selected_index = next(i for i, method in enumerate(methods) if method is selected)
-    packaged_selection = {**selection, "selected_run_dir": f"outputs/runs/{selected_index}_candidate", "selected_checkpoint": "model/model.pt"}
-    entries["outputs/comparison/selection.json"] = (json.dumps(packaged_selection, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode("utf-8")
+            add(run / filename, f"{archive_dir}/{filename}")
+    packaged_selection = {**selection, "selected_run_dir": archive_run_dirs[str(selected_run)], "selected_checkpoint": "model/model.pt"}
+    archived_selection_path = "outputs/multiseed_summary/selection.json" if multi_seed else "outputs/comparison/selection.json"
+    entries[archived_selection_path] = (json.dumps(packaged_selection, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode("utf-8")
     manifest = {"format_version": 1, "student_id": args.student_id, "name": args.name,
-                "selected_model_name": selected["model_name"], "selection_metric": "q3", "validation_metrics": selected["validation_metrics"],
+                "selected_model_name": selected["model_name"], "selection_metric": selection["selection_metric"], "validation_metrics": selected["validation_metrics"],
+                "multi_seed_selection": multi_seed, "representative_seed": 42 if multi_seed else None,
                 "files": {name: {"sha256": hashlib.sha256(path).hexdigest() if isinstance(path, bytes) else sha256(path), "bytes": len(path) if isinstance(path, bytes) else path.stat().st_size} for name, path in sorted(entries.items())}}
     output = project_path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -173,6 +216,7 @@ def main():
     parser.add_argument("--pred", default="predictions.npz")
     parser.add_argument("--report", default="report.pdf")
     parser.add_argument("--audit-dir", default="outputs/data_audit")
+    parser.add_argument("--runs-root", default="outputs", help="Root holding runs/, multiseed/, and seed-42 comparison/.")
     parser.add_argument("--student-id", required=True)
     parser.add_argument("--name", required=True)
     parser.add_argument("--output-dir", default="submissions")
