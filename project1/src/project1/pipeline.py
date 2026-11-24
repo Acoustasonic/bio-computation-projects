@@ -6,6 +6,7 @@ import hashlib
 import json
 import platform
 import random
+import subprocess
 import sys
 import time
 from dataclasses import asdict
@@ -36,6 +37,17 @@ def json_ready(value: Any) -> Any:
 
 def write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(json_ready(value), ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+
+
+def source_commit(project_root: Path) -> str | None:
+    """Record the dedicated deployment repository, never an unrelated parent repo."""
+    if not (project_root.parent / ".git").exists():
+        return None
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=project_root.parent,
+                                       stderr=subprocess.DEVNULL, text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
 
 
 def choose_device(name: str) -> torch.device:
@@ -243,7 +255,10 @@ class BaselinePipeline:
                 save_predictions(output / "baseline_test.npz", split, self.predict(split))
             manifest.update(status="complete", best_epoch=self.best_epoch,
                             environment={"python": platform.python_version(), "numpy": np.__version__,
-                                         "torch": str(torch.__version__), "device": str(self.device)},
+                                         "torch": str(torch.__version__), "device": str(self.device),
+                                         "platform": platform.platform(), "cuda_runtime": torch.version.cuda,
+                                         "gpu_name": torch.cuda.get_device_name(self.device) if self.device.type == "cuda" else None},
+                            source_commit=source_commit(project_root),
                             validation_ids_sha256=hashlib.sha256(validation_split.ids.tobytes()).hexdigest(),
                             train_proteins=len(train_split.ids), validation_proteins=len(validation_split.ids),
                             validation_residues=int(validation_split.valid_mask.sum()),
