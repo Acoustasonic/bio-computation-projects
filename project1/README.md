@@ -125,4 +125,4 @@ python package_submission.py --data processed_data --selection outputs/multiseed
 
 ## 已完成的核验
 
-`outputs/data_audit/verification.json` 记录矩阵逐项一致性；15次训练的 `run_manifest.json` 记录已完成状态、源码版本、实际环境及模型哈希；`outputs/comparison/` 保存统一重算的验证指标和图。`predictions.metadata.json`（提交包内位于 `outputs/`）记录最终模型与测试预测哈希。打包程序对每个归档文件回读校验，并生成 `submission_manifest.json` 与 ZIP 的 `.sha256` 文件。
+`outputs/data_audit/verification.json` 记录矩阵逐项一致性；15次训练的 `run_manifest.json` 记录已完成状态、源码版本、实际环境及模型哈希；`outputs/multiseed_summary/` 保存五seed汇总，`outputs/comparison/` 保存seed42细节分析。预测metadata在提交包内为 `outputs/prediction_metadata.json`，记录最终模型与测试预测哈希。打包程序对每个归档文件回读校验，并生成 `submission_manifest.json` 与 ZIP 的 `.sha256` 文件。
