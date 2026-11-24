@@ -2,9 +2,17 @@
 
 ## 当前状态
 
-本轮仅完成代码实现、配置整理和静态检查。**没有执行数据重建、训练、预测、评估或测试，也没有安装依赖。** 模型效果、运行耗时及标准矩阵的一致性尚待实际运行确认。课程给出的 baseline 参考值约为 Q3=0.676、macro-F1=0.662，不是本轮的实测结果。
+已于2026-11-24完成原始数据重建、三种模型训练、验证集比较和测试集预测。重建矩阵与课程标准逐项一致；测试集1102条序列、244922个有效残基的预测通过 `FORMAT_VALID` 检查。测试标签未提供，因此不报告测试集准确率。
 
-任务和数据规则见 `project1_assignment.pdf`、`DATA_DICTIONARY.md`；方法来源及简化见 `REFERENCES.md`。以下命令用于后续运行，本轮没有执行。
+| 方法 | validation Q3 | macro-F1 | H F1 | E F1 | C F1 | 最佳轮次 |
+|---|---:|---:|---:|---:|---:|---:|
+| 课程 CNN baseline | 0.67565 | 0.66245 | 0.71324 | 0.58039 | 0.69373 | 8 |
+| 扩张残差 CNN | 0.68752 | 0.67448 | 0.72930 | 0.59601 | 0.69813 | 7 |
+| **BiLSTM（最终选择）** | **0.70001** | **0.68933** | **0.74976** | **0.62192** | **0.69630** | **8** |
+
+最终模型仅依据验证集选择。BiLSTM 相对 baseline 的 Q3 提升2.44个百分点；这是单一随机种子的结果。实际环境为 Ubuntu 24.04、Python 3.11.18、PyTorch 2.5.1 / CUDA 12.4、单张 RTX 4090；使用GPU0和8个计算线程。训练源码提交为 `c3538979a95d348d54256d8a51c28c45c3ec5585`，后续文档更新不改变模型。
+
+任务和数据规则见课程单独提供的 `project1_assignment.pdf`、`DATA_DICTIONARY.md`；方法来源及简化见 `REFERENCES.md`。Git 仓库仅同步代码和文档，课程数据另行提供；提交 ZIP 另含报告、运行证据、已选模型和预测。
 
 ## 实现内容
 
@@ -26,9 +34,9 @@
 
 三个模型只使用同一套氨基酸编码，不使用 profile、模板或预训练模型。输出均为 `[batch, 698, 3]`；PAD=0，UNK=21，H/E/C=0/1/2，损失忽略 -100。两候选采用相同的训练预算与早停规则，并启用梯度裁剪1.0；这些设置均写入各自配置和运行记录。
 
-## 后续运行顺序
+## 复现运行顺序
 
-先按 `ENVIRONMENT.md` 准备 Python 3.11 和依赖，在本目录运行命令。示例使用 CPU；后续决定用 GPU 时，可将训练及预测命令中的 `--device cpu` 改为 `--device cuda`。
+先按 `ENVIRONMENT.md` 准备 Python 3.11 和依赖，在本目录运行命令。以下给出CPU兼容命令；本次云端实跑将训练及预测命令中的 `--device cpu` 改为 `--device cuda`，并设置 `CUDA_VISIBLE_DEVICES=0`、`OMP_NUM_THREADS=8`、`OPENBLAS_NUM_THREADS=8`、`MKL_NUM_THREADS=8`。
 
 ### 1. 重建数据并验证
 
@@ -44,7 +52,7 @@ python prepare_data.py
 - 按题面固定阈值建无向图，取传递连通分量；跨 split 只保留 `test > validation > train` 最高优先级成员。
 - 在源顺序上编码并右填充到698；不读取 test 标签。
 
-保留数量应与课程标准的8084/1057/1102一致，但该结果尚未在本轮运行确认。审计包含原始/保留/排除计数、记录映射、接受边、连通组及 `verification.json`。比较失败时不发布处理结果。输出已存在时默认拒绝覆盖；`--overwrite` 只用于替换本程序先前生成的目录。
+本次保留数量为8084/1057/1102，与课程标准一致；分别排除719/45/0条记录。审计包含原始/保留/排除计数、记录映射、接受边、连通组及 `verification.json`。比较失败时不发布处理结果。输出已存在时默认拒绝覆盖；`--overwrite` 只用于替换本程序先前生成的目录。
 
 ### 2. 分别运行 baseline 和两候选
 
@@ -95,6 +103,6 @@ python package_submission.py --data processed_data --selection outputs/compariso
 
 归档后的模型位于 `model/model.pt`，可用 `predict.py --checkpoint model/model.pt --data <课程数据路径> --split test --output predictions_reloaded.npz --device cpu` 重载。重做原始处理时需另行提供课程的 `source_data/` 和 `standard_data/`。
 
-## 本轮尚待执行的检查
+## 已完成的核验
 
-原始数据重建能否逐项匹配标准矩阵、模型 forward/反向传播、padding 行为、实际训练效果、设备兼容性、预测格式与提交 ZIP 的运行核验，均留待后续运行阶段确认。当前不提供虚构的成绩、checkpoint、测试预测或实验报告。
+`outputs/data_audit/verification.json` 记录矩阵逐项一致性；三次训练的 `run_manifest.json` 记录已完成状态、源码版本、实际环境及模型哈希；`outputs/comparison/` 保存统一重算的验证指标和图。`predictions.metadata.json`（提交包内位于 `outputs/`）记录最终模型与测试预测哈希。打包程序对每个归档文件回读校验，并生成 `submission_manifest.json` 与 ZIP 的 `.sha256` 文件。

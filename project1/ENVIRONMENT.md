@@ -30,3 +30,31 @@ Install PyTorch for the commands in the README.
 Check the installation with `python -c "import torch; print(torch.__version__, torch.cuda.is_available())"`. The README uses the CPU command, which also works when the CUDA check prints `False`.
 
 Record your actual dependency versions and run commands in your submission.
+
+## Verified cloud run (2026-11-24)
+
+The completed run used an isolated Python environment on Ubuntu 24.04 with one
+NVIDIA GeForce RTX 4090 (24 GB), GPU 0 only, and 8 CPU computation threads.
+The container limit was 10 CPU cores and 60 GiB RAM.
+
+| Component | Actual version |
+|---|---|
+| Python | 3.11.18 |
+| PyTorch | 2.5.1 |
+| CUDA runtime used by PyTorch | 12.4 |
+| NumPy | 1.26.4 |
+| SciPy | 1.14.1 |
+| scikit-learn | 1.5.2 |
+| Matplotlib | 3.9.4 |
+
+The GPU commands were the README training and prediction commands with
+`--device cuda`, using these shell settings:
+
+```sh
+export CUDA_VISIBLE_DEVICES=0
+export OMP_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 MKL_NUM_THREADS=8
+```
+
+Each `outputs/runs/*/run_manifest.json` contains the actual command, environment,
+source commit and model hash. No GPU or Python environment is bundled in the
+submission; install dependencies before reloading the selected model.
