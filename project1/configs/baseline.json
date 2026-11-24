@@ -1,0 +1,29 @@
+{
+  "data": {
+    "data_dir": "standard_data",
+    "input_padding_value": 0,
+    "label_padding_value": -100
+  },
+  "model": {
+    "name": "convolutional",
+    "vocabulary_size": 22,
+    "embedding_dim": 24,
+    "hidden_dim": 64,
+    "kernel_size": 7,
+    "dropout": 0.15,
+    "num_classes": 3
+  },
+  "training": {
+    "optimizer": "adamw",
+    "learning_rate": 0.001,
+    "batch_size": 64,
+    "max_epochs": 8,
+    "patience": 2,
+    "seed": 42,
+    "num_threads": 8
+  },
+  "runtime": {
+    "device": "cpu",
+    "output_dir": "outputs"
+  }
+}

@@ -1,0 +1,45 @@
+# Course data and generated artifacts
+source_data/
+standard_data/
+processed_data/
+outputs/
+model/
+submissions/
+*.npy
+*.npz
+*.pt
+*.pth
+*.pkl
+*.pickle
+*.pdf
+*.zip
+*.tar
+*.gz
+
+# Python environments and caches
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Local settings, credentials, and SSH helpers
+.env
+.env.*
+!.env.example
+.ssh/
+.aws/
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+*credentials*
+*token*
+*password*
+*ssh_helper*
+*askpass*
+.DS_Store
+Thumbs.db
