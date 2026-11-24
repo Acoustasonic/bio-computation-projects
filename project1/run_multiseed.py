@@ -32,6 +32,8 @@ def digest(path: Path) -> str:
 
 def completed_run(run: Path, expected: dict, data: Path, device: str) -> bool:
     """Reuse only a complete run whose model, configuration and data agree."""
+    import numpy as np
+
     if not run.exists():
         return False
     required = ("model.pt", "metrics.json", "config.json", "history.json", "history.csv",
@@ -46,7 +48,8 @@ def completed_run(run: Path, expected: dict, data: Path, device: str) -> bool:
     manifest = read_json(run / "run_manifest.json")
     if (manifest.get("status") != "complete" or manifest.get("test_used_for_selection") is not False
             or manifest.get("model_sha256") != digest(run / "model.pt")
-            or manifest.get("validation_ids_sha256") != digest(data / "validation/ids.npy")
+            or manifest.get("validation_ids_sha256") != hashlib.sha256(
+                np.load(data / "validation/ids.npy", allow_pickle=False).tobytes()).hexdigest()
             or manifest.get("environment", {}).get("device") != device):
         raise ValueError(f"Existing run has incomplete or inconsistent evidence: {run}")
     return True
