@@ -58,3 +58,21 @@ export OMP_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 MKL_NUM_THREADS=8
 Each `outputs/runs/*/run_manifest.json` contains the actual command, environment,
 source commit and model hash. No GPU or Python environment is bundled in the
 submission; install dependencies before reloading the selected model.
+
+The paired multi-seed extension uses seeds 42, 43, 44, 45 and 46 for all three
+methods on the same processed train/validation split. Seed 42 reuses the original
+three runs (commit `c3538979a95d348d54256d8a51c28c45c3ec5585`); the twelve
+additional runs use commit `2c65968461749996ef39fb7ca7b343e70527a9bb`.
+The training entry, model, configuration defaults, data loader, optimizer,
+metrics and trainer core are unchanged between these commits. The run plan
+records their file hashes, and each run saves its effective configuration.
+Only the seed and output directory differ within a method. The same CUDA
+environment and eight computation threads were used throughout.
+
+Report mean and sample standard deviation (`ddof=1`) across the five runs.
+Select a candidate method by mean validation Q3, then mean macro-F1 and model
+name on ties. The submitted checkpoint uses the selected method's fixed seed
+42; it is neither the best seed nor an ensemble. Current reference-array hashes
+identify the arrays used for analysis. They are not historical per-run training
+hashes; the original seed-42 data evidence is the preceding reconstruction audit
+and its recorded validation IDs/counts.
